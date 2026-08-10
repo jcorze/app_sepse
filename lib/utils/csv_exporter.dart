@@ -38,13 +38,13 @@ class CsvExporter {
       final row = [
         tx.id,
         dateFormat.format(tx.date),
-        tx.account.name,
+        tx.account, // Stringa diretta del conto
         tx.type.name,
         tx.category,
         tx.subcategory,
         tx.amount.toStringAsFixed(2).replaceAll('.', ','),
         tx.note,
-        tx.targetAccount?.name ?? '',
+        tx.targetAccount ?? '', // Stringa diretta del conto destinazione o vuota
       ];
 
       csvBuffer.write('${row.join(';')}\r\n');

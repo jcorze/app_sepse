@@ -4,12 +4,12 @@ import '../models/transaction.dart';
 
 class HomePage extends StatefulWidget {
   final double periodExpenses;
-  final double periodIncome; // Aggiunto per calcolare i risparmi
+  final double periodIncome;
   final double totalNetWorth;
   final DateTimeRange selectedDateRange;
+  final List<String> accounts;
   final VoidCallback onPickDateRange;
-  final Function(AccountType) getAccountBalance;
-  final String Function(AccountType) getAccountName;
+  final Function(String) getAccountBalance;
   final Function(TransactionType) onOpenTransactionModal;
 
   const HomePage({
@@ -18,9 +18,9 @@ class HomePage extends StatefulWidget {
     required this.periodIncome,
     required this.totalNetWorth,
     required this.selectedDateRange,
+    required this.accounts,
     required this.onPickDateRange,
     required this.getAccountBalance,
-    required this.getAccountName,
     required this.onOpenTransactionModal,
   });
 
@@ -29,15 +29,12 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  // Stato per gestire la visibilità del patrimonio (nascosto di default)
   bool _isNetWorthVisible = false;
 
   @override
   Widget build(BuildContext context) {
     final currencyFormat = NumberFormat.currency(locale: 'it_IT', symbol: '€');
     final dateFormat = DateFormat('dd/MM/yyyy');
-
-    // Calcolo dei risparmi del periodo
     final double periodSavings = widget.periodIncome - widget.periodExpenses;
 
     return LayoutBuilder(
@@ -52,7 +49,7 @@ class _HomePageState extends State<HomePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Card Spese del Periodo
+              // Card Spese
               Card(
                 color: Colors.red.shade50,
                 elevation: 2,
@@ -92,7 +89,7 @@ class _HomePageState extends State<HomePage> {
               ),
               const SizedBox(height: 12),
 
-              // Card Risparmi del Periodo (Entrate - Spese)
+              // Card Risparmi
               Card(
                 color: periodSavings >= 0 ? Colors.blue.shade50 : Colors.orange.shade50,
                 elevation: 2,
@@ -122,7 +119,7 @@ class _HomePageState extends State<HomePage> {
               ),
               const SizedBox(height: 12),
 
-              // Card Patrimonio Totale (con toggle di visibilità)
+              // Card Patrimonio Totale con conti dinamici
               Card(
                 color: Colors.teal.shade50,
                 elevation: 2,
@@ -133,7 +130,7 @@ class _HomePageState extends State<HomePage> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const SizedBox(width: 40), // Spacer per centrare il titolo
+                          const SizedBox(width: 40),
                           const Text(
                             'Patrimonio Totale',
                             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.teal),
@@ -163,48 +160,21 @@ class _HomePageState extends State<HomePage> {
                         ),
                       ),
                       const Divider(height: 20),
-                      Row(
-                        children: [
-                          Expanded(
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        alignment: WrapAlignment.center,
+                        children: widget.accounts.map((accountName) {
+                          return SizedBox(
+                            width: (constraints.maxWidth * 0.85) / (constraints.maxWidth > 600 ? 3 : 2),
                             child: _buildBalanceColumn(
-                              widget.getAccountName(AccountType.bank1),
-                              widget.getAccountBalance(AccountType.bank1),
-                              Icons.account_balance,
-                              currencyFormat,
-                            ),
-                          ),
-                          Container(height: 30, width: 1, color: Colors.teal.shade200),
-                          Expanded(
-                            child: _buildBalanceColumn(
-                              widget.getAccountName(AccountType.bank2),
-                              widget.getAccountBalance(AccountType.bank2),
+                              accountName,
+                              widget.getAccountBalance(accountName),
                               Icons.account_balance_wallet,
                               currencyFormat,
                             ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _buildBalanceColumn(
-                              widget.getAccountName(AccountType.cash),
-                              widget.getAccountBalance(AccountType.cash),
-                              Icons.payments,
-                              currencyFormat,
-                            ),
-                          ),
-                          Container(height: 30, width: 1, color: Colors.teal.shade200),
-                          Expanded(
-                            child: _buildBalanceColumn(
-                              widget.getAccountName(AccountType.etf),
-                              widget.getAccountBalance(AccountType.etf),
-                              Icons.show_chart,
-                              currencyFormat,
-                            ),
-                          ),
-                        ],
+                          );
+                        }).toList(),
                       ),
                     ],
                   ),

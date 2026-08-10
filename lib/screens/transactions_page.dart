@@ -7,7 +7,7 @@ class TransactionsPage extends StatelessWidget {
   final Function(String) onDeleteTransaction;
   final Function(TransactionType, Transaction) onEditTransaction;
   final VoidCallback onExportCsv;
-  final String Function(AccountType) getAccountName;
+  final String Function(String) getAccountName;
 
   const TransactionsPage({
     super.key,

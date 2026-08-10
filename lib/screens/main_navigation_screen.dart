@@ -20,6 +20,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _currentIndex = 0;
   final List<Transaction> _transactions = [];
 
+  // Lista dinamica dei conti (salvata su SharedPreferences)
+  List<String> _accounts = ['Conto Principale', 'Conto Secondario', 'Contanti', 'ETF'];
+
   // Categorie delle spese
   final Map<String, List<String>> _expenseCategories = {
     'Macchina': ['Benzina', 'Meccanico', 'Parcheggio', 'Assicurazione', 'Pulizia'],
@@ -38,7 +41,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     'Entrate': ['Stipendio', 'Altro'],
   };
 
-  // Seleziona in automatico il mese corrente
   DateTimeRange _selectedDateRange = DateTimeRange(
     start: DateTime(DateTime.now().year, DateTime.now().month, 1),
     end: DateTime.now(),
@@ -47,9 +49,138 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   @override
   void initState() {
     super.initState();
+    _loadAccounts();
     _loadData();
   }
 
+  // --- GESTIONE CONTI DINAMICI ---
+  Future<void> _loadAccounts() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedAccounts = prefs.getStringList('saved_accounts');
+    if (savedAccounts != null && savedAccounts.isNotEmpty) {
+      setState(() {
+        _accounts = savedAccounts;
+      });
+    }
+  }
+
+  Future<void> _saveAccounts() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('saved_accounts', _accounts);
+  }
+
+  void _addAccount(String name) {
+    if (name.trim().isNotEmpty && !_accounts.contains(name.trim())) {
+      setState(() {
+        _accounts.add(name.trim());
+      });
+      _saveAccounts();
+    }
+  }
+
+  void _deleteAccount(String name) {
+    if (_accounts.length <= 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Devi mantenere almeno un conto attivo.')),
+      );
+      return;
+    }
+    setState(() {
+      _accounts.remove(name);
+    });
+    _saveAccounts();
+  }
+
+  void _renameAccount(int index, String newName) {
+    if (newName.trim().isNotEmpty) {
+      setState(() {
+        _accounts[index] = newName.trim();
+      });
+      _saveAccounts();
+    }
+  }
+
+  String _getAccountName(String account) {
+    return account;
+  }
+
+  void _openManageAccountsDialog() {
+    final TextEditingController newAccountController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Gestione Conti', style: TextStyle(fontWeight: FontWeight.bold)),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ..._accounts.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final accountName = entry.value;
+                    final editController = TextEditingController(text: accountName);
+
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: TextField(
+                        controller: editController,
+                        decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
+                        onSubmitted: (value) {
+                          _renameAccount(index, value);
+                          setDialogState(() {});
+                        },
+                      ),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                        onPressed: () {
+                          if (_accounts.length <= 1) return;
+                          _deleteAccount(accountName);
+                          setDialogState(() {});
+                        },
+                      ),
+                    );
+                  }),
+                  const Divider(height: 24),
+                  TextField(
+                    controller: newAccountController,
+                    decoration: const InputDecoration(
+                      labelText: 'Nuovo Conto',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.add),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
+                    icon: const Icon(Icons.add),
+                    label: const Text('Aggiungi Conto'),
+                    onPressed: () {
+                      if (newAccountController.text.trim().isNotEmpty) {
+                        _addAccount(newAccountController.text.trim());
+                        newAccountController.clear();
+                        setDialogState(() {});
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Chiudi'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- GESTIONE DATI TRANSAZIONI ---
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
     final String? txData = prefs.getString('saved_transactions');
@@ -91,7 +222,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     _saveTransactions();
   }
 
-  // Metodo per gestire l'importazione da CSV
   Future<void> _importCsvData() async {
     final importedTransactions = await CsvImporter.importTransactions(context);
     if (importedTransactions != null && importedTransactions.isNotEmpty) {
@@ -109,7 +239,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     }
   }
 
-  double _getAccountBalance(AccountType account) {
+  // --- CALCOLI FINANZIARI ---
+  double _getAccountBalance(String account) {
     return _transactions.fold(0.0, (sum, item) {
       if (item.type == TransactionType.transfer) {
         if (item.account == account) return sum - item.amount;
@@ -129,10 +260,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   }
 
   double get _totalNetWorth =>
-      _getAccountBalance(AccountType.bank1) +
-          _getAccountBalance(AccountType.bank2) +
-          _getAccountBalance(AccountType.cash) +
-          _getAccountBalance(AccountType.etf);
+      _accounts.fold(0.0, (sum, account) => sum + _getAccountBalance(account));
 
   bool _isTxInSelectedRange(Transaction tx) {
     return tx.date.isAfter(_selectedDateRange.start.subtract(const Duration(days: 1))) &&
@@ -145,15 +273,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     }).fold(0.0, (sum, item) => sum + item.amount);
   }
 
-  // Aggiunto per calcolare le entrate del periodo
   double get _periodIncome {
     return _transactions.where((item) {
       return item.type == TransactionType.income && _isTxInSelectedRange(item);
     }).fold(0.0, (sum, item) => sum + item.amount);
-  }
-
-  String _getAccountName(AccountType account) {
-    return account.defaultName;
   }
 
   void _pickDateRange() async {
@@ -182,8 +305,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         type: type,
         expenseCategories: _expenseCategories,
         incomeCategories: _incomeCategories,
-        getAccountName: _getAccountName,
-        getAccountBalance: _getAccountBalance,
+        accounts: _accounts,
         onSubmit: _saveOrUpdateTransaction,
         existingTransaction: existingTransaction,
       ),
@@ -195,12 +317,12 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     final List<Widget> pages = [
       HomePage(
         periodExpenses: _periodExpenses,
-        periodIncome: _periodIncome, // <-- Passato correttamente qui
+        periodIncome: _periodIncome,
         totalNetWorth: _totalNetWorth,
         selectedDateRange: _selectedDateRange,
+        accounts: _accounts,
         onPickDateRange: _pickDateRange,
         getAccountBalance: _getAccountBalance,
-        getAccountName: _getAccountName,
         onOpenTransactionModal: (type) => _openTransactionModal(type: type),
       ),
       TransactionsPage(
@@ -227,7 +349,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
             icon: const Icon(Icons.settings),
             tooltip: 'Impostazioni',
             onSelected: (value) {
-              if (value == 'adjustment') {
+              if (value == 'manage_accounts') {
+                _openManageAccountsDialog();
+              } else if (value == 'adjustment') {
                 _openTransactionModal(type: TransactionType.adjustment);
               } else if (value == 'export_csv') {
                 CsvExporter.exportTransactions(context, _transactions);
@@ -236,6 +360,17 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               }
             },
             itemBuilder: (BuildContext context) => [
+              const PopupMenuItem(
+                value: 'manage_accounts',
+                child: Row(
+                  children: [
+                    Icon(Icons.account_balance_wallet, color: Colors.teal),
+                    SizedBox(width: 8),
+                    Text('Gestisci Conti'),
+                  ],
+                ),
+              ),
+              const PopupMenuDivider(),
               const PopupMenuItem(
                 value: 'adjustment',
                 child: Row(

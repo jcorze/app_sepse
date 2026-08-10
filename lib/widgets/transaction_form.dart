@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../models/transaction.dart';
 
 class TransactionForm extends StatefulWidget {
   final TransactionType type;
   final Map<String, List<String>> expenseCategories;
   final Map<String, List<String>> incomeCategories;
-  final String Function(AccountType) getAccountName;
-  final double Function(AccountType)? getAccountBalance; // <-- NUOVO: per ottenere il saldo attuale
+  final List<String> accounts; // Lista dei conti dinamica
   final Function(Transaction) onSubmit;
   final Transaction? existingTransaction;
 
@@ -16,8 +14,7 @@ class TransactionForm extends StatefulWidget {
     required this.type,
     required this.expenseCategories,
     required this.incomeCategories,
-    required this.getAccountName,
-    this.getAccountBalance,
+    required this.accounts,
     required this.onSubmit,
     this.existingTransaction,
   });
@@ -27,147 +24,68 @@ class TransactionForm extends StatefulWidget {
 }
 
 class _TransactionFormState extends State<TransactionForm> {
-  final _amountController = TextEditingController();
-  final _noteController = TextEditingController();
-
-  // 1. RIMOSSO 'late' E IMPOSTATI VALORI DI DEFAULT SICURI
-  Map<String, List<String>> _activeCategories = {};
-  String _selectedCategory = '';
-  String _selectedSubcategory = '';
-
-  DateTime _selectedDate = DateTime.now();
-  AccountType _selectedAccount = AccountType.bank1;
-  AccountType _selectedTargetAccount = AccountType.etf;
+  final _formKey = GlobalKey<FormState>();
+  late double _amount;
+  late DateTime _date;
+  late String _category;
+  late String _subcategory;
+  late String _note;
+  late String _selectedAccount;
+  String? _selectedTargetAccount;
 
   @override
   void initState() {
     super.initState();
+    final tx = widget.existingTransaction;
+    _amount = tx?.amount ?? 0.0;
+    _date = tx?.date ?? DateTime.now();
 
-    // 2. Inizializzazione categorie in base al tipo
-    if (widget.type == TransactionType.income) {
-      _activeCategories = widget.incomeCategories;
-    } else if (widget.type == TransactionType.transfer) {
-      _activeCategories = {'Giroconto': ['Trasferimento Interno']};
-    } else if (widget.type == TransactionType.adjustment) {
-      _activeCategories = {'Sistema': ['Rettifica Saldo']};
+    // Gestione categorie
+    if (widget.type == TransactionType.expense) {
+      _category = tx?.category ?? widget.expenseCategories.keys.first;
+      final subList = widget.expenseCategories[_category] ?? ['Generale'];
+      _subcategory = tx?.subcategory ?? subList.first;
+    } else if (widget.type == TransactionType.income) {
+      _category = tx?.category ?? widget.incomeCategories.keys.first;
+      final subList = widget.incomeCategories[_category] ?? ['Generale'];
+      _subcategory = tx?.subcategory ?? subList.first;
     } else {
-      _activeCategories = widget.expenseCategories;
+      _category = tx?.category ?? 'Rettifica';
+      _subcategory = tx?.subcategory ?? '';
     }
 
-    // Fallignment di sicurezza se la mappa è vuota
-    if (_activeCategories.isEmpty) {
-      _activeCategories = {
-        'Altro': ['Varie']
-      };
-    }
+    _note = tx?.note ?? '';
 
-    if (widget.existingTransaction != null) {
-      final tx = widget.existingTransaction!;
-      _amountController.text = tx.amount.toString();
-      _noteController.text = tx.note;
-      _selectedCategory = _activeCategories.containsKey(tx.category)
-          ? tx.category
-          : _activeCategories.keys.first;
-
-      final subList = _activeCategories[_selectedCategory];
-      _selectedSubcategory = (subList != null && subList.contains(tx.subcategory))
-          ? tx.subcategory
-          : (subList?.isNotEmpty == true ? subList!.first : 'Varie');
-
-      _selectedDate = tx.date;
-      _selectedAccount = tx.account;
-      if (tx.targetAccount != null) {
-        _selectedTargetAccount = tx.targetAccount!;
-      }
-    } else {
-      _selectedCategory = _activeCategories.keys.first;
-      _selectedSubcategory = _activeCategories[_selectedCategory]!.first;
-    }
-
-    _amountController.addListener(() {
-      setState(() {});
-    });
-  }
-
-  @override
-  void dispose() {
-    _amountController.dispose();
-    _noteController.dispose();
-    super.dispose();
+    // Gestione conti dinamici
+    _selectedAccount = tx?.account ?? widget.accounts.first;
+    _selectedTargetAccount = tx?.targetAccount ?? (widget.accounts.length > 1 ? widget.accounts[1] : widget.accounts.first);
   }
 
   void _submitData() {
-    final enteredValue = double.tryParse(_amountController.text.replaceAll(',', '.'));
+    if (_formKey.currentState!.validate()) {
+      _formKey.currentState!.save();
 
-    if (enteredValue == null) {
-      return;
-    }
-
-    double finalAmount = enteredValue;
-
-    if (widget.type == TransactionType.adjustment) {
-      final currentBalance = widget.getAccountBalance?.call(_selectedAccount) ?? 0.0;
-      finalAmount = enteredValue - currentBalance;
-
-      if (finalAmount == 0) {
+      if (widget.type == TransactionType.transfer && _selectedAccount == _selectedTargetAccount) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Il saldo inserito è già identico a quello attuale.')),
+          const SnackBar(content: Text('Il conto di origine e di destinazione non possono essere uguali.')),
         );
         return;
       }
-    } else {
-      if (enteredValue <= 0) return;
-    }
 
-    if (widget.type == TransactionType.transfer && _selectedAccount == _selectedTargetAccount) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Seleziona due conti diversi per il trasferimento')),
+      final newTx = Transaction(
+        id: widget.existingTransaction?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
+        amount: _amount,
+        date: _date,
+        category: widget.type == TransactionType.transfer ? 'Trasferimento' : (widget.type == TransactionType.adjustment ? 'Rettifica' : _category),
+        subcategory: widget.type == TransactionType.transfer || widget.type == TransactionType.adjustment ? '' : _subcategory,
+        note: _note,
+        type: widget.type,
+        account: _selectedAccount,
+        targetAccount: widget.type == TransactionType.transfer ? _selectedTargetAccount : null,
       );
-      return;
-    }
 
-    final newTx = Transaction(
-      id: widget.existingTransaction?.id ?? DateTime.now().toIso8601String(),
-      amount: finalAmount,
-      date: _selectedDate,
-      category: _selectedCategory,
-      subcategory: _selectedSubcategory,
-      note: _noteController.text.isEmpty && widget.type == TransactionType.adjustment
-          ? 'Rettifica a €${enteredValue.toStringAsFixed(2)}'
-          : _noteController.text,
-      type: widget.type,
-      account: _selectedAccount,
-      targetAccount: widget.type == TransactionType.transfer ? _selectedTargetAccount : null,
-    );
-
-    widget.onSubmit(newTx);
-    Navigator.of(context).pop();
-  }
-
-  String _getTitleText() {
-    if (widget.existingTransaction != null) return 'Modifica Movimento';
-    switch (widget.type) {
-      case TransactionType.expense:
-        return 'Nuova Spesa';
-      case TransactionType.income:
-        return 'Nuova Entrata';
-      case TransactionType.transfer:
-        return 'Trasferimento tra Conti';
-      case TransactionType.adjustment:
-        return 'Rettifica Saldo / ETF';
-    }
-  }
-
-  Color _getTitleColor() {
-    switch (widget.type) {
-      case TransactionType.expense:
-        return Colors.red;
-      case TransactionType.income:
-        return Colors.green;
-      case TransactionType.transfer:
-        return Colors.blue.shade700;
-      case TransactionType.adjustment:
-        return Colors.orange.shade800;
+      widget.onSubmit(newTx);
+      Navigator.of(context).pop();
     }
   }
 
@@ -175,193 +93,114 @@ class _TransactionFormState extends State<TransactionForm> {
   Widget build(BuildContext context) {
     final isTransfer = widget.type == TransactionType.transfer;
     final isAdjustment = widget.type == TransactionType.adjustment;
-    final mediaQuery = MediaQuery.of(context);
 
-    final currentAccountBalance = isAdjustment && widget.getAccountBalance != null
-        ? widget.getAccountBalance!(_selectedAccount)
-        : 0.0;
-
-    final targetBalanceInput = double.tryParse(_amountController.text.replaceAll(',', '.')) ?? currentAccountBalance;
-    final calculatedAdjustment = targetBalanceInput - currentAccountBalance;
-
-    return Container(
-      constraints: BoxConstraints(
-        maxHeight: mediaQuery.size.height * 0.85,
-      ),
+    return Padding(
       padding: EdgeInsets.only(
-        top: 16,
+        bottom: MediaQuery.of(context).viewInsets.bottom,
         left: 16,
         right: 16,
-        bottom: mediaQuery.viewInsets.bottom + 16,
+        top: 16,
       ),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              _getTitleText(),
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: _getTitleColor(),
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                widget.existingTransaction == null ? 'Nuovo Movimento' : 'Modifica Movimento',
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
               ),
-            ),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<AccountType>(
-              value: _selectedAccount,
-              decoration: InputDecoration(
-                labelText: isTransfer ? 'Da (Conto Origine)' : 'Seleziona Conto',
-                border: const OutlineInputBorder(),
-              ),
-              items: AccountType.values.map((acc) {
-                return DropdownMenuItem(
-                  value: acc,
-                  child: Text(widget.getAccountName(acc)),
-                );
-              }).toList(),
-              onChanged: (val) {
-                if (val != null) setState(() => _selectedAccount = val);
-              },
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _amountController,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: InputDecoration(
-                labelText: isAdjustment ? 'Nuovo Saldo Totale (€)' : 'Importo (€)',
-                border: const OutlineInputBorder(),
-                prefixIcon: const Icon(Icons.euro),
-                helperText: isAdjustment ? 'Inserisci il saldo finale che vuoi ottenere' : null,
-              ),
-            ),
-            if (isAdjustment) ...[
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.orange.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange.shade200),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Saldo Attuale: € ${currentAccountBalance.toStringAsFixed(2)}',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Verrà registrato uno scostamento di: ${calculatedAdjustment >= 0 ? '+' : ''}${calculatedAdjustment.toStringAsFixed(2)} €',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: calculatedAdjustment >= 0 ? Colors.green.shade800 : Colors.red.shade800,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            const SizedBox(height: 12),
-            if (isTransfer) ...[
-              DropdownButtonFormField<AccountType>(
-                value: _selectedTargetAccount,
-                decoration: const InputDecoration(
-                  labelText: 'A (Conto Destinazione)',
-                  border: OutlineInputBorder(),
-                ),
-                items: AccountType.values.map((acc) {
-                  return DropdownMenuItem(
-                    value: acc,
-                    child: Text(widget.getAccountName(acc)),
-                  );
-                }).toList(),
-                onChanged: (val) {
-                  if (val != null) setState(() => _selectedTargetAccount = val);
-                },
-              ),
-              const SizedBox(height: 12),
-            ],
-            if (widget.type == TransactionType.expense || widget.type == TransactionType.income) ...[
-              DropdownButtonFormField<String>(
-                value: _activeCategories.containsKey(_selectedCategory) ? _selectedCategory : null,
-                decoration: const InputDecoration(labelText: 'Categoria', border: OutlineInputBorder()),
-                items: _activeCategories.keys.map((cat) {
-                  return DropdownMenuItem(value: cat, child: Text(cat));
-                }).toList(),
-                onChanged: (val) {
-                  if (val != null) {
-                    setState(() {
-                      _selectedCategory = val;
-                      _selectedSubcategory = _activeCategories[val]!.first;
-                    });
+              const SizedBox(height: 16),
+              // Importo
+              TextFormField(
+                initialValue: _amount == 0.0 ? '' : _amount.toString(),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(labelText: 'Importo (€)', border: OutlineInputBorder()),
+                validator: (value) {
+                  if (value == null || double.tryParse(value) == null || double.parse(value) <= 0) {
+                    return 'Inserisci un importo valido';
                   }
+                  return null;
                 },
+                onSaved: (value) => _amount = double.parse(value!),
               ),
               const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: (_activeCategories[_selectedCategory]?.contains(_selectedSubcategory) ?? false)
-                    ? _selectedSubcategory
-                    : null,
-                decoration: const InputDecoration(labelText: 'Sottocategoria', border: OutlineInputBorder()),
-                items: (_activeCategories[_selectedCategory] ?? []).map((sub) {
-                  return DropdownMenuItem(value: sub, child: Text(sub));
-                }).toList(),
-                onChanged: (val) {
-                  if (val != null) {
+
+              // Categorie (se non trasferimento o rettifica)
+              if (!isTransfer && !isAdjustment) ...[
+                DropdownButtonFormField<String>(
+                  value: _category,
+                  decoration: const InputDecoration(labelText: 'Categoria', border: OutlineInputBorder()),
+                  items: (widget.type == TransactionType.expense ? widget.expenseCategories : widget.incomeCategories)
+                      .keys
+                      .map((cat) => DropdownMenuItem(value: cat, child: Text(cat)))
+                      .toList(),
+                  onChanged: (val) {
                     setState(() {
-                      _selectedSubcategory = val;
+                      _category = val!;
+                      final subList = (widget.type == TransactionType.expense ? widget.expenseCategories : widget.incomeCategories)[_category] ?? [];
+                      _subcategory = subList.isNotEmpty ? subList.first : '';
                     });
-                  }
-                },
-              ),
-              const SizedBox(height: 12),
-            ],
-            Row(
-              children: [
-                Expanded(
-                  child: Text('Data: ${DateFormat('dd/MM/yyyy').format(_selectedDate)}'),
-                ),
-                TextButton.icon(
-                  icon: const Icon(Icons.calendar_today),
-                  label: const Text('Scegli Data'),
-                  onPressed: () async {
-                    final pickedDate = await showDatePicker(
-                      context: context,
-                      initialDate: _selectedDate,
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime.now(),
-                    );
-                    if (pickedDate != null) {
-                      setState(() {
-                        _selectedDate = pickedDate;
-                      });
-                    }
                   },
-                )
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  value: _subcategory,
+                  decoration: const InputDecoration(labelText: 'Sottocategoria', border: OutlineInputBorder()),
+                  items: ((widget.type == TransactionType.expense ? widget.expenseCategories : widget.incomeCategories)[_category] ?? [])
+                      .map((sub) => DropdownMenuItem(value: sub, child: Text(sub)))
+                      .toList(),
+                  onChanged: (val) => setState(() => _subcategory = val!),
+                ),
+                const SizedBox(height: 12),
               ],
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _noteController,
-              decoration: const InputDecoration(
-                labelText: 'Nota (opzionale)',
-                border: OutlineInputBorder(),
+
+              // Selezione Conto
+              DropdownButtonFormField<String>(
+                value: _selectedAccount,
+                decoration: InputDecoration(
+                  labelText: isTransfer ? 'Conto Origine' : 'Conto',
+                  border: const OutlineInputBorder(),
+                ),
+                items: widget.accounts.map((acc) {
+                  return DropdownMenuItem(value: acc, child: Text(acc));
+                }).toList(),
+                onChanged: (val) => setState(() => _selectedAccount = val!),
               ),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _getTitleColor(),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
+              const SizedBox(height: 12),
+
+              // Conto di destinazione (solo per trasferimenti)
+              if (isTransfer) ...[
+                DropdownButtonFormField<String>(
+                  value: _selectedTargetAccount,
+                  decoration: const InputDecoration(labelText: 'Conto Destinazione', border: OutlineInputBorder()),
+                  items: widget.accounts.map((acc) {
+                    return DropdownMenuItem(value: acc, child: Text(acc));
+                  }).toList(),
+                  onChanged: (val) => setState(() => _selectedTargetAccount = val!),
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              // Nota
+              TextFormField(
+                initialValue: _note,
+                decoration: const InputDecoration(labelText: 'Nota (opzionale)', border: OutlineInputBorder()),
+                onSaved: (value) => _note = value ?? '',
               ),
-              onPressed: _submitData,
-              child: Text(widget.existingTransaction != null ? 'Aggiorna Movimento' : 'Salva Movimento'),
-            )
-          ],
+              const SizedBox(height: 20),
+
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
+                onPressed: _submitData,
+                child: const Text('Salva', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
         ),
       ),
     );
