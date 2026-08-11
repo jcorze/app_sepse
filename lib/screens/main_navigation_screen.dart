@@ -104,75 +104,207 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     return account;
   }
 
+  void _renameAccountEverywhere(String oldName, String newName) {
+    if (oldName == newName) return;
+
+    for (int i = 0; i < _transactions.length; i++) {
+      if (_transactions[i].account == oldName) {
+        _transactions[i] = _transactions[i].copyWith(
+          account: newName,
+        );
+      }
+
+      if (_transactions[i].targetAccount == oldName) {
+        _transactions[i] = _transactions[i].copyWith(
+          targetAccount: newName,
+        );
+      }
+    }
+  }
+
   void _openManageAccountsDialog() {
     final TextEditingController newAccountController = TextEditingController();
+
+    // Copia temporanea dei conti
+    List<String> tempAccounts = List.from(_accounts);
+
+    List<TextEditingController> controllers = tempAccounts
+        .map((account) => TextEditingController(text: account))
+        .toList();
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Gestione Conti', style: TextStyle(fontWeight: FontWeight.bold)),
+          title: const Text(
+            'Gestione Conti',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
           content: SizedBox(
             width: double.maxFinite,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  ..._accounts.asMap().entries.map((entry) {
-                    final index = entry.key;
-                    final accountName = entry.value;
-                    final editController = TextEditingController(text: accountName);
+            height: 500,
+            child: Column(
+              children: [
+                Expanded(
+                  child: ReorderableListView.builder(
+                    buildDefaultDragHandles: false,
+                    itemCount: tempAccounts.length,
+                    onReorder: (oldIndex, newIndex) {
+                      if (newIndex > oldIndex) newIndex--;
 
-                    return ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: TextField(
-                        controller: editController,
-                        decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
-                        onSubmitted: (value) {
-                          _renameAccount(index, value);
-                          setDialogState(() {});
-                        },
-                      ),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () {
-                          if (_accounts.length <= 1) return;
-                          _deleteAccount(accountName);
-                          setDialogState(() {});
-                        },
-                      ),
-                    );
-                  }),
-                  const Divider(height: 24),
-                  TextField(
-                    controller: newAccountController,
-                    decoration: const InputDecoration(
-                      labelText: 'Nuovo Conto',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.add),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Aggiungi Conto'),
-                    onPressed: () {
-                      if (newAccountController.text.trim().isNotEmpty) {
-                        _addAccount(newAccountController.text.trim());
-                        newAccountController.clear();
-                        setDialogState(() {});
-                      }
+                      setDialogState(() {
+                        final account = tempAccounts.removeAt(oldIndex);
+                        tempAccounts.insert(newIndex, account);
+
+                        final controller = controllers.removeAt(oldIndex);
+                        controllers.insert(newIndex, controller);
+                      });
+                    },
+                    itemBuilder: (context, index) {
+                      return Card(
+                        key: ValueKey(tempAccounts[index]),
+                        margin: const EdgeInsets.symmetric(vertical: 4),
+                        child: ListTile(
+                          leading: ReorderableDragStartListener(
+                            index: index,
+                            child: const Icon(Icons.drag_handle),
+                          ),
+                          title: TextField(
+                            controller: controllers[index],
+                            decoration: const InputDecoration(
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                          ),
+                          trailing: IconButton(
+                            icon: const Icon(
+                              Icons.delete,
+                              color: Colors.red,
+                            ),
+                            onPressed: () {
+                              if (tempAccounts.length <= 1) return;
+
+                              setDialogState(() {
+                                controllers[index].dispose();
+                                controllers.removeAt(index);
+                                tempAccounts.removeAt(index);
+                              });
+                            },
+                          ),
+                        ),
+                      );
                     },
                   ),
-                ],
-              ),
+                ),
+
+                const Divider(height: 20),
+
+                TextField(
+                  controller: newAccountController,
+                  decoration: const InputDecoration(
+                    labelText: 'Nuovo Conto',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.add),
+                  ),
+                ),
+
+                const SizedBox(height: 10),
+
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.teal,
+                    foregroundColor: Colors.white,
+                  ),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Aggiungi Conto'),
+                  onPressed: () {
+                    final newName = newAccountController.text.trim();
+
+                    if (newName.isEmpty) return;
+
+                    if (tempAccounts.contains(newName)) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Esiste già un conto con questo nome'),
+                        ),
+                      );
+                      return;
+                    }
+
+                    setDialogState(() {
+                      tempAccounts.add(newName);
+                      controllers.add(
+                        TextEditingController(text: newName),
+                      );
+                      newAccountController.clear();
+                    });
+                  },
+                ),
+              ],
             ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Chiudi'),
+              onPressed: () {
+                for (final controller in controllers) {
+                  controller.dispose();
+                }
+                Navigator.pop(context);
+              },
+              child: const Text('Annulla'),
+            ),
+
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.teal,
+                foregroundColor: Colors.white,
+              ),
+              icon: const Icon(Icons.save),
+              label: const Text('Salva'),
+              onPressed: () async {
+                final updatedAccounts = controllers
+                    .map((c) => c.text.trim())
+                    .where((name) => name.isNotEmpty)
+                    .toList();
+
+                final uniqueAccounts = updatedAccounts.toSet().toList();
+
+                if (uniqueAccounts.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Deve esistere almeno un conto'),
+                    ),
+                  );
+                  return;
+                }
+
+                setState(() {
+                  final oldAccounts = List<String>.from(_accounts);
+
+                  for (int i = 0; i < oldAccounts.length; i++) {
+                    if (i < uniqueAccounts.length &&
+                        oldAccounts[i] != uniqueAccounts[i]) {
+                      _renameAccountEverywhere(
+                        oldAccounts[i],
+                        uniqueAccounts[i],
+                      );
+                    }
+                  }
+
+                  _accounts = uniqueAccounts;
+                });
+
+                await _saveAccounts();
+                await _saveTransactions();
+
+                for (final controller in controllers) {
+                  controller.dispose();
+                }
+
+                if (context.mounted) {
+                  Navigator.pop(context);
+                }
+              },
             ),
           ],
         ),
@@ -342,7 +474,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Spese'),
+        title: const Text('Spese v2'),
         centerTitle: true,
         actions: [
           PopupMenuButton<String>(

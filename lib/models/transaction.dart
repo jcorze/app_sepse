@@ -23,6 +23,32 @@ class Transaction {
     this.targetAccount,
   });
 
+  // Crea una copia della transazione modificando solo
+  // i campi che vengono specificati.
+  Transaction copyWith({
+    String? id,
+    double? amount,
+    DateTime? date,
+    String? category,
+    String? subcategory,
+    String? note,
+    TransactionType? type,
+    String? account,
+    String? targetAccount,
+  }) {
+    return Transaction(
+      id: id ?? this.id,
+      amount: amount ?? this.amount,
+      date: date ?? this.date,
+      category: category ?? this.category,
+      subcategory: subcategory ?? this.subcategory,
+      note: note ?? this.note,
+      type: type ?? this.type,
+      account: account ?? this.account,
+      targetAccount: targetAccount ?? this.targetAccount,
+    );
+  }
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'amount': amount,
