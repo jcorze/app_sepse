@@ -438,6 +438,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         expenseCategories: _expenseCategories,
         incomeCategories: _incomeCategories,
         accounts: _accounts,
+        getAccountBalance: _getAccountBalance, // <-- Lascia solo questo
         onSubmit: _saveOrUpdateTransaction,
         existingTransaction: existingTransaction,
       ),

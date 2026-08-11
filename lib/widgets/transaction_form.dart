@@ -6,6 +6,7 @@ class TransactionForm extends StatefulWidget {
   final Map<String, List<String>> expenseCategories;
   final Map<String, List<String>> incomeCategories;
   final List<String> accounts; // Lista dei conti dinamica
+  final double Function(String)? getAccountBalance; // <-- Aggiunto per ottenere il saldo del conto
   final Function(Transaction) onSubmit;
   final Transaction? existingTransaction;
 
@@ -15,6 +16,7 @@ class TransactionForm extends StatefulWidget {
     required this.expenseCategories,
     required this.incomeCategories,
     required this.accounts,
+    this.getAccountBalance,
     required this.onSubmit,
     this.existingTransaction,
   });
@@ -25,7 +27,7 @@ class TransactionForm extends StatefulWidget {
 
 class _TransactionFormState extends State<TransactionForm> {
   final _formKey = GlobalKey<FormState>();
-  late double _amount;
+  late final TextEditingController _amountController; // Convertito a controller per la reattività del saldo
   late DateTime _date;
   late String _category;
   late String _subcategory;
@@ -37,7 +39,10 @@ class _TransactionFormState extends State<TransactionForm> {
   void initState() {
     super.initState();
     final tx = widget.existingTransaction;
-    _amount = tx?.amount ?? 0.0;
+
+    _amountController = TextEditingController(
+      text: tx != null ? tx.amount.toString() : '',
+    );
     _date = tx?.date ?? DateTime.now();
 
     // Gestione categorie
@@ -59,11 +64,23 @@ class _TransactionFormState extends State<TransactionForm> {
     // Gestione conti dinamici
     _selectedAccount = tx?.account ?? widget.accounts.first;
     _selectedTargetAccount = tx?.targetAccount ?? (widget.accounts.length > 1 ? widget.accounts[1] : widget.accounts.first);
+
+    // Listener per aggiornare la UI in tempo reale durante la scrittura dell'importo/saldo
+    _amountController.addListener(() {
+      setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _amountController.dispose();
+    super.dispose();
   }
 
   void _submitData() {
     if (_formKey.currentState!.validate()) {
-      _formKey.currentState!.save();
+      final enteredValue = double.tryParse(_amountController.text.replaceAll(',', '.'));
+      if (enteredValue == null) return;
 
       if (widget.type == TransactionType.transfer && _selectedAccount == _selectedTargetAccount) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -72,13 +89,34 @@ class _TransactionFormState extends State<TransactionForm> {
         return;
       }
 
+      double finalAmount = enteredValue;
+
+      // Gestione del calcolo per la rettifica del saldo
+      if (widget.type == TransactionType.adjustment) {
+        final currentBalance = widget.getAccountBalance?.call(_selectedAccount) ?? 0.0;
+        finalAmount = enteredValue - currentBalance;
+
+        if (finalAmount == 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Il saldo inserito è già identico a quello attuale.')),
+          );
+          return;
+        }
+      } else {
+        if (enteredValue <= 0) return;
+      }
+
+      final finalNote = _note.isEmpty && widget.type == TransactionType.adjustment
+          ? 'Rettifica a €${enteredValue.toStringAsFixed(2)}'
+          : _note;
+
       final newTx = Transaction(
         id: widget.existingTransaction?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
-        amount: _amount,
+        amount: finalAmount,
         date: _date,
         category: widget.type == TransactionType.transfer ? 'Trasferimento' : (widget.type == TransactionType.adjustment ? 'Rettifica' : _category),
         subcategory: widget.type == TransactionType.transfer || widget.type == TransactionType.adjustment ? '' : _subcategory,
-        note: _note,
+        note: finalNote,
         type: widget.type,
         account: _selectedAccount,
         targetAccount: widget.type == TransactionType.transfer ? _selectedTargetAccount : null,
@@ -93,6 +131,14 @@ class _TransactionFormState extends State<TransactionForm> {
   Widget build(BuildContext context) {
     final isTransfer = widget.type == TransactionType.transfer;
     final isAdjustment = widget.type == TransactionType.adjustment;
+
+    // Calcoli per la preview della rettifica
+    final currentAccountBalance = isAdjustment && widget.getAccountBalance != null
+        ? widget.getAccountBalance!(_selectedAccount)
+        : 0.0;
+
+    final targetBalanceInput = double.tryParse(_amountController.text.replaceAll(',', '.')) ?? currentAccountBalance;
+    final calculatedAdjustment = targetBalanceInput - currentAccountBalance;
 
     return Padding(
       padding: EdgeInsets.only(
@@ -114,20 +160,59 @@ class _TransactionFormState extends State<TransactionForm> {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 16),
-              // Importo
+
+              // Importo / Nuovo Saldo
               TextFormField(
-                initialValue: _amount == 0.0 ? '' : _amount.toString(),
+                controller: _amountController,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Importo (€)', border: OutlineInputBorder()),
+                decoration: InputDecoration(
+                  labelText: isAdjustment ? 'Nuovo Saldo Totale (€)' : 'Importo (€)',
+                  border: const OutlineInputBorder(),
+                  prefixIcon: isAdjustment ? const Icon(Icons.euro) : null,
+                  helperText: isAdjustment ? 'Inserisci il saldo finale che vuoi ottenere' : null,
+                ),
                 validator: (value) {
-                  if (value == null || double.tryParse(value) == null || double.parse(value) <= 0) {
+                  if (value == null || double.tryParse(value.replaceAll(',', '.')) == null) {
                     return 'Inserisci un importo valido';
+                  }
+                  if (!isAdjustment && double.parse(value.replaceAll(',', '.')) <= 0) {
+                    return 'L\'importo deve essere maggiore di zero';
                   }
                   return null;
                 },
-                onSaved: (value) => _amount = double.parse(value!),
               ),
               const SizedBox(height: 12),
+
+              // Box Informativo per la Rettifica Saldo (come nel primo codice)
+              if (isAdjustment) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange.shade200),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Saldo Attuale: € ${currentAccountBalance.toStringAsFixed(2)}',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Verrà registrato uno scostamento di: ${calculatedAdjustment >= 0 ? '+' : ''}${calculatedAdjustment.toStringAsFixed(2)} €',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                          color: calculatedAdjustment >= 0 ? Colors.green.shade800 : Colors.red.shade800,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
 
               // Categorie (se non trasferimento o rettifica)
               if (!isTransfer && !isAdjustment) ...[
@@ -189,7 +274,7 @@ class _TransactionFormState extends State<TransactionForm> {
               TextFormField(
                 initialValue: _note,
                 decoration: const InputDecoration(labelText: 'Nota (opzionale)', border: OutlineInputBorder()),
-                onSaved: (value) => _note = value ?? '',
+                onChanged: (value) => _note = value,
               ),
               const SizedBox(height: 20),
 
